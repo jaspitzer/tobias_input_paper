@@ -1,4 +1,7 @@
-import panda as pd
+import pandas as pd
+import os
+
+configfile: "config.yaml"
 
 samples = (
     pd.read_table(config["samplefile"])
@@ -6,42 +9,35 @@ samples = (
     .sort_index
 )
 
+bam_dir = "results/mapped_clean/"
+
 
 def bams_condition(wildcards):
         files = samples.loc[wildcards.conditon]
         bams = files["Filebase"].to_list()]
-        bams = [bam_dir + x + ".clean.bam" for x in bams]
+        bams= [bam_dir + x + ".clean.bam" for x in bams]
         return bams
 
-rule merge_bams:
-	input:
-		bams_condition
-	output:
-		temp("results/merged_bams/{condition}_merged.bam")
-	threads:
-		8
-	conda:
-		"envs/samtools.yaml"
-	shell:
-		"samtools merge {output} {input} - -threads 7
 
 rule conditionbam:
 	input:
 		bams_condition
 	output:
-		bam = "results/merged_bams/{condition}_merged.bam",
-		bai = "results/merged_bams/{condition}_merged_sorted.bam.bai"
+		bam= "results/merged_bams/{condition}_merged.bam",
+		bai= "results/merged_bams/{condition}_merged_sorted.bam.bai"
 	threads:
 		10
 	message:
 		"Joining individual bamfiles from condition {wildcards.condition}"
+    conda:
+        "envs/samtools.yaml"
 	run:
-		output_dir = "results/merged_bams/"
+		output_dir= "results/merged_bams/"
 
-		merge_bams = []
+		merge_bams= []
 		for bam in input:
-			prefix = os.path.basename(bam)
-			temp_prefix = output_dir + prefix
+			prefix= os.path.basename(bam)
+			temp_prefix= output_dir + prefix
 			merge_bams.append(os.path.join(output_dir, prefix + ".sorted"))
 			shell("samtools sort {0} -o {1} -@ {2} -T {3}".format(bam, merge_bams[-1], threads, temp_prefix))
 
@@ -53,31 +49,53 @@ rule conditionbam:
 			shell("samtools index {output.bam}")
 
 
-
-rule sort_merged:
+rule coverage_bigwig:
 	input:
-		"results/merged_bams/{condition}_merged.bam"
+		bam= rules.conditionbam.output.bam,
+		chromsizes= rules.get_fasta_chroms.output.txt
 	output:
-		"results/merged_bams/{condition}_merged_sorted.bam"
-	threads:
-		4
+		bedgraph= temp(os.path.join(OUTPUTDIR, "coverage", "{condition}_coverage.bg")),
+		bigwig= os.path.join(OUTPUTDIR, "coverage", "{condition}_coverage.bw")
+	params:
+		"-T " + os.path.join(OUTPUTDIR, "coverage")  # temporary dir for sorting
 	conda:
-		"envs/samtools.yaml"
+		os.path.join(environments_dir, "coverage.yaml")
 	shell:
-		"samtools sort {input} -@ {threads} -o {output}"
+		"bedtools genomecov -ibam {input.bam} -bg | sort -k1,1 -k2,2n {params} > {output.bedgraph};"
+		"bedGraphToBigWig {output.bedgraph} {input.chromsizes} {output.bigwig}"
 
 
-rule index_merged:
-    input:
-		"results/merged_bams/{condition}_merged_sorted.bam"
-    output:
-		"results/merged_bams/{condition}_merged_sorted.bam.bai"
-    conda:
-		"envs/samtools.yaml"
-    threads:
-    		4
-    shell:
-    		"samtools index {input} -@ {threads}"
+gsizes = {"human": "hs",
+			"mouse": "mm",
+			"zebrafish": 1369631918}  # https://deeptools.readthedocs.io/en/develop/content/feature/effectiveGenomeSize.html
+
+def condition_for_bam(wildcards):
+        file = samples.loc[{wildcards.condition]].set_index("Filebase").loc[{wildcards.sample}][filebase]
+        file= "results/mapped_clean/" + file + ".bam"
+        return file
+
+
+rule macs:
+	input:
+        bam= "results/mapped_clean/{sample_id}.bam"
+	output:
+		macs= os.path.join(OUTPUTDIR, "peak_calling", "{condition}", "{sample_id}_peaks.broadPeak"),
+		raw= os.path.join(OUTPUTDIR, "peak_calling", "{condition}", "{sample_id}_raw.bed")
+	log:
+		os.path.join(OUTPUTDIR, "logs", "{condition}_{sample_id}_peak_calling.log")
+	message:
+		"Running macs2 with .bam-file: {input}"
+	conda:
+		os.path.join(environments_dir, "macs.yaml")
+	params:
+        condition= condition_for_bam
+		"--name {sample_id}",
+		"--outdir " + os.path.join(OUTPUTDIR, "peak_calling", "{condition}"),
+		"--gsize " + str(gsizes[config["run_info"]["organism"]]),
+		config.get("macs", "--nomodel --shift -100 --extsize 200 --broad"),
+	shell:
+		"macs2 callpeak -t {input} {params} &> {log}; "
+		"cp {output.macs} {output.raw}; "
 
 
 rule get_bigwigs:
