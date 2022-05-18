@@ -1,1 +1,9 @@
-samplefile: 
+samplefile: data/sample_annotation_filtered_dexa.txt
+
+conditions:
+   - healthy
+   - critical
+   - mild
+
+run_info:
+   organism: human

@@ -3,6 +3,8 @@ import os
 
 configfile: "config.yaml"
 
+OUTPUTDIR = config['run_info']["output"]
+
 samples = (
     pd.read_table(config["samplefile"])
     .set_index("Condition", drop=False)
@@ -17,6 +19,16 @@ def bams_condition(wildcards):
         bams = files["Filebase"].to_list()]
         bams= [bam_dir + x + ".clean.bam" for x in bams]
         return bams
+
+rule get_fasta_chroms:
+	input:
+		"data/index/hg19.p13.plusMT.no_alt_analysis_set.fa"
+	output:
+		txt = os.path.join(OUTPUTDIR, "flatfiles", "chromsizes.txt"),
+		bed = os.path.join(OUTPUTDIR, "flatfiles", "chromsizes.bed")
+	shell:
+		"samtools faidx {input} --fai-idx {output.txt};"
+		"awk '{{ print $1\"\t\"0\"\t\"$2 }}' {output.txt} > {output.bed}"
 
 
 rule conditionbam:
@@ -77,7 +89,7 @@ def condition_for_bam(wildcards):
 
 rule macs:
 	input:
-        bam= "results/mapped_clean/{sample_id}.bam"
+        bam= condition_for_bam,
 	output:
 		macs= os.path.join(OUTPUTDIR, "peak_calling", "{condition}", "{sample_id}_peaks.broadPeak"),
 		raw= os.path.join(OUTPUTDIR, "peak_calling", "{condition}", "{sample_id}_raw.bed")
@@ -88,7 +100,6 @@ rule macs:
 	conda:
 		os.path.join(environments_dir, "macs.yaml")
 	params:
-        condition= condition_for_bam
 		"--name {sample_id}",
 		"--outdir " + os.path.join(OUTPUTDIR, "peak_calling", "{condition}"),
 		"--gsize " + str(gsizes[config["run_info"]["organism"]]),
