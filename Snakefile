@@ -4,6 +4,7 @@ import os
 configfile: "config.yaml"
 
 OUTPUTDIR = config['run_info']["output"]
+CONDITION_IDS = list(config["data"].keys())
 
 samples = (
     pd.read_table(config["samplefile"])
@@ -12,6 +13,7 @@ samples = (
 )
 
 bam_dir = "results/mapped_clean/"
+peak_dir = "results/peak_calling/"
 
 
 def bams_condition(wildcards):
@@ -20,6 +22,7 @@ def bams_condition(wildcards):
         bams= [bam_dir + x + ".clean.bam" for x in bams]
         return bams
 
+# here i kinda need to figuire out how to remove certain chromosomes from the list, as I do some cleaning later
 rule get_fasta_chroms:
 	input:
 		"data/index/hg19.p13.plusMT.no_alt_analysis_set.fa"
@@ -107,6 +110,64 @@ rule macs:
 	shell:
 		"macs2 callpeak -t {input} {params} &> {log}; "
 		"cp {output.macs} {output.raw}; "
+
+
+def peaks_condition(wildcards):
+        files = samples.loc[wildcards.conditon]
+        peaks = files["Filebase"].to_list()]
+        peaks= [peak_dir + x + ".clean.bam" for x in peaks]
+        return peaks
+
+
+rule process_peaks:
+	input:
+		peaks = peaks_condition,
+		blacklist = BLACKLIST,
+		whitelist = rules.get_fasta_chroms.output.bed
+	output:
+		peaks = os.path.join(OUTPUTDIR, "peak_calling", "{condition}_union.bed")
+	message: "Processing peaks from condition {wildcards.condition}"
+	conda:
+		"envs/tools.yaml"
+	shell:
+		"cat {input.peaks} | cut -f1-3 | sort -k1,1 -k2,2n | bedtools merge -d 5 | "
+		"bedtools subtract -a - -b {input.blacklist} -A | "
+		"bedtools intersect -a - -b {input.whitelist} -wa | "
+		"awk '$1 !~ /[M]/' | "  # exclude chromosome M
+		# add condition name to each peak
+		"awk '{{print $s\"\\t{wildcards.condition}\"}}' > {output.peaks}"
+
+# Union peaks across all conditions
+rule merge_condition_peaks:
+	input:
+		[os.path.join(OUTPUTDIR, "peak_calling", condition + "_union.bed") for condition in CONDITION_IDS]
+	output:
+		temp(os.path.join(OUTPUTDIR, "peak_calling", "all_merged.tmp"))
+	message:
+		"Merging peaks across conditions"
+	conda:
+		os.path.join(environments_dir, "tools.yaml")
+	shell:
+		"cat {input} | sort -k1,1 -k2,2n | bedtools merge -d 5 -c 4 -o distinct > {output}"
+
+# Get correct sorting of peak_names
+rule sort_peak_names:
+	input:
+		rules.merge_condition_peaks.output
+	output:
+		peaks = os.path.join(OUTPUTDIR, "peak_calling", "all_merged.bed")
+	run:
+		out = open(output[0], "w")
+		with open(input[0]) as f:
+			for line in f:
+				columns = line.rstrip().split("\t")
+
+				# Sort according to condition names
+				peak_ids = columns[3].split(",")
+				columns[3] = ",".join(sorted(peak_ids, key= lambda x: CONDITION_IDS.index(x)))
+
+				out.write("\t".join(columns) + "\n")
+		out.close()
 
 
 rule get_bigwigs:

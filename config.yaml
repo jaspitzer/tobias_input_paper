@@ -7,3 +7,4 @@ conditions:
 
 run_info:
    organism: human
+   output: results
