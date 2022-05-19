@@ -170,25 +170,4 @@ rule sort_peak_names:
 				out.write("\t".join(columns) + "\n")
 		out.close()
 
-
-rule get_bigwigs:
-	input:
-		"results_merged_bams/{condition}_merged_sorted.bam"
-	output:
-		"results/bigwigs/{condition}.bw
-	conda:
-		"envs/deeptools.yaml"
-	shell:
-		"bamCoverage -b {input} -o {output} -of bigwig --effectiveGenomeSize 2864785220 -e –ignoreForNormalization chrX chrM"
-
-
-rule call_peaks_merged:
-	input:
-		"results/called_peaks_merged/{condition}.narrowPeak
-	output:
-
-
-# rule matrix_compute:
-#	input:
-#		bw="results/bigwigs/{condition}.bw"
-#		regions=""
+#peaks so far are called, merged and _merged_sorted

@@ -1,5 +1,7 @@
+name: bedtools_env
+
 channels:
   - bioconda
   - conda-forge
 dependencies:
-  - samtools =1.14
+  - bedtools
