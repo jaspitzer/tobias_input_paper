@@ -8,3 +8,6 @@ conditions:
 run_info:
    organism: human
    output: results
+   fasta: data/genome_chr4.fa.gz             #.fasta-file containing organism genome. NOTE: must be uncompressed .fa or bgzip compressed compatible with samtools
+   blacklist: data/blacklist_chr4.bed        #.bed-file containing blacklisted regions
+   gtf: data/genes_chr4.gtf

@@ -5,6 +5,8 @@ configfile: "config.yaml"
 
 OUTPUTDIR = config['run_info']["output"]
 CONDITION_IDS = list(config["data"].keys())
+BLACKLIST = config['run_info']["blacklist"]
+GTF = config['run_info']["gtf"]
 
 samples = (
     pd.read_table(config["samplefile"])
@@ -171,3 +173,78 @@ rule sort_peak_names:
 		out.close()
 
 #peaks so far are called, merged and _merged_sorted
+
+#Config for uropa annotation
+rule uropa_config:
+	input:
+		bed = rules.sort_peak_names.output.peaks, 	#os.path.join(OUTPUTDIR, "peak_calling", "all_merged.bed"),
+		gtf = GTF
+	output:
+		config = os.path.join(OUTPUTDIR, "peak_annotation", "all_merged_annotated.config")
+	run:
+
+		import json
+		config = {"queries":[
+					{"feature":"gene", "feature.anchor":"start", "distance":[10000,1000], "filter_attribute":"gene_biotype", "attribute_values":"protein_coding", "name":"protein_coding_promoter"},
+					{"feature":"gene", "distance":1, "filter_attribute":"gene_biotype", "attribute_values":"protein_coding", "internals":0.1, "name":"protein_coding_internal"},
+					{"feature":"gene", "feature.anchor":"start", "distance":[10000,1000], "name":"any_promoter"},
+					{"feature":"gene", "distance":1, "internals":0.1, "name":"any_internal"},
+					{"feature":"gene", "distance":[50000, 50000], "name":"distal_enhancer"},
+					],
+				"show_attributes":["gene_biotype", "gene_id", "gene_name"],
+				"priority":"True"
+				}
+
+		config["gtf"] = input.gtf
+		config["bed"] = input.bed
+
+		string_config = json.dumps(config, indent=4)
+
+		config_file = open(output[0], "w")
+		config_file.write(string_config)
+		config_file.close()
+
+
+# Peak annotation
+# peaks per condition or across conditions, dependent on run info output
+rule uropa:
+	input:
+		config = rules.uropa_config.output.config 	#os.path.join(OUTPUTDIR, "peak_annotation", "all_merged_annotated.config")
+	output:
+		finalhits = os.path.join(OUTPUTDIR, "peak_annotation", "all_merged_annotated_finalhits.txt"),
+		finalhits_sub = os.path.join(OUTPUTDIR, "peak_annotation", "all_merged_annotated_finalhits_sub.txt"),
+		peaks = os.path.join(OUTPUTDIR, "peak_annotation", "all_merged_annotated.bed"),
+		header = os.path.join(OUTPUTDIR, "peak_annotation", "all_merged_annotated_header.txt"),
+	threads:
+		99
+	log:
+		os.path.join(OUTPUTDIR, "logs", "uropa.log")
+	params:
+		prefix = os.path.join(OUTPUTDIR, "peak_annotation", "all_merged_annotated")
+	conda:
+		os.path.join(environments_dir, "uropa.yaml")
+	shell:
+		"uropa --input {input.config} --prefix {params.prefix} --threads {threads} &> {log}; "
+		"cut -f 1-4,7-13,16-19 {output.finalhits} > {output.finalhits_sub}; " #Get a subset of columns
+		"head -n 1 {output.finalhits_sub} > {output.header};"  #header
+		"tail -n +2 {output.finalhits_sub} > {output.peaks}"   #bedlines
+
+#create header for "peaks" given via run_infow
+rule create_peaks_header:
+	input:
+		config["run_info"]["peaks"]
+	output:
+		os.path.join(OUTPUTDIR, "peak_annotation", "peaks_header.txt")
+	run:
+
+		#Assumes bed6-format + additional columns
+		columns = open(input[0]).readline().split("\t")
+		n = len(columns)
+
+		header = ["chr", "start", "stop", "name", "score", "strand"] + ["column_{0}".format(i) for i in range(6+1,n+1)]
+
+		#Write header to file
+		s = "\t".join(header)
+		f = open(output[0], "w")
+		f.write(s)
+		f.close()
