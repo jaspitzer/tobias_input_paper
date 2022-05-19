@@ -16,6 +16,8 @@ bam_dir = "results/mapped_clean/"
 peak_dir = "results/peak_calling/"
 
 
+
+#asd
 def bams_condition(wildcards):
         files = samples.loc[wildcards.conditon]
         bams = files["Filebase"].to_list()]
